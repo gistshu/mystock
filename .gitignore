@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.venv/
+
+# Local runtime data
+stock_journal.db
+uploads/
+.easyocr-model/
+
+# Local scratch / generated
+sample_top.png
+
+# OS files
+.DS_Store
