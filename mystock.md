@@ -66,3 +66,62 @@
 - 相依：`requirements.txt`
 - 本摘要：`SESSION_SUMMARY.md`
 
+---
+
+## GitHub 進度
+- 已初始化 Git 倉庫並完成提交。
+- 已建立公開倉庫並推送：`https://github.com/gistshu/mystock`
+- 已加入 `.gitignore` 並移除 `sample.png` 追蹤，避免公開敏感截圖資料。
+
+---
+
+## 更新時間
+- 本摘要最後更新：2026-04-14
+
+---
+
+## 今日調整摘要（2026-04-15）
+
+### 1. 新增「區間清單」頁籤（前端）
+- 在既有頁籤新增第三頁：`區間清單`
+- 可設定：
+  - 起始日期
+  - 結束日期
+- 可一鍵查詢「時間範圍內所有商品」資料
+
+### 2. 新增全商品區間清單 API（後端）
+- 新增 API：`GET /api/all-product-data`
+- 支援 query 參數：
+  - `start`
+  - `end`
+- 回傳欄位：
+  - `record_date`
+  - `product`
+  - `current_price`
+  - `cost_price`
+  - `investment_cost`
+  - `book_income`
+  - `profit_loss`
+  - `profit_loss_rate`
+  - `daily_profit_change`
+
+### 3. 排序規則（依需求）
+- 清單結果排序已調整為：
+  - 商品：遞減（`product DESC`）
+  - 時間：遞減（`record_date DESC`）
+
+### 4. 使用方式
+1. 啟動 `mystock` 服務後，進入「區間清單」頁籤
+2. 選擇起訖日期
+3. 點「查詢全部商品」
+4. 下方表格即顯示區間內所有商品資料（商品+時間遞減）
+
+### 5. 影響檔案
+- `app.py`（HTML/JS 分頁與清單查詢邏輯、`/api/all-product-data` 路由）
+
+### 6. 備註
+- 本次未更動資料表 schema，直接沿用 `daily_stock_records`。
+- 如無資料，前端會顯示 0 筆結果。
+
+## 更新時間
+- 本摘要最後更新：2026-04-15

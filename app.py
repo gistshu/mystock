@@ -119,6 +119,7 @@ HTML = """
     <div class="tabs">
       <button class="tab active" id="tabUploadBtn" onclick="switchTab('upload')">上傳與寫入</button>
       <button class="tab" id="tabQueryBtn" onclick="switchTab('query')">查詢與圖表</button>
+      <button class="tab" id="tabListingBtn" onclick="switchTab('listing')">區間清單</button>
     </div>
 
     <section id="tabUpload" class="card">
@@ -218,6 +219,35 @@ HTML = """
       <h2 style="margin-top:16px;">總投資成本 / 總帳面收入（全商品）</h2>
       <div style="margin-top: 14px;"><canvas id="chartPortfolioTotals"></canvas></div>
     </section>
+
+    <section id="tabListing" class="card hidden">
+      <h2>4) 依起訖日期查看所有商品資訊清單</h2>
+      <div class="grid grid-2">
+        <div>
+          <label>起始日期</label>
+          <input type="date" id="listStartDate" />
+        </div>
+        <div>
+          <label>結束日期</label>
+          <input type="date" id="listEndDate" value="{{ today }}" />
+        </div>
+      </div>
+      <div class="flex" style="margin-top:12px;">
+        <button onclick="loadAllProductData()">查詢全部商品</button>
+      </div>
+
+      <p class="muted" id="listingInfo" style="margin-top:10px;">排序：商品（遞減）＋日期（遞減）</p>
+      <div style="overflow:auto;">
+        <table id="allDetailTable">
+          <thead>
+            <tr>
+              <th>日期</th><th>商品</th><th>現價</th><th>成本價</th><th>投資成本</th><th>帳面收入</th><th>損益</th><th>損益率(%)</th><th>日增減損益</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
   </div>
 
 <script>
@@ -233,10 +263,15 @@ let latestProductRows = [];
 function switchTab(which) {
   document.getElementById('tabUpload').classList.toggle('hidden', which !== 'upload');
   document.getElementById('tabQuery').classList.toggle('hidden', which !== 'query');
+  document.getElementById('tabListing').classList.toggle('hidden', which !== 'listing');
   document.getElementById('tabUploadBtn').classList.toggle('active', which === 'upload');
   document.getElementById('tabQueryBtn').classList.toggle('active', which === 'query');
+  document.getElementById('tabListingBtn').classList.toggle('active', which === 'listing');
   if (which === 'query') {
     refreshProducts();
+  }
+  if (which === 'listing') {
+    loadAllProductData();
   }
 }
 
@@ -382,6 +417,12 @@ async function refreshProducts() {
   }
   if (!document.getElementById('startDate').value) {
     document.getElementById('startDate').value = data.min_date || '';
+  }
+  if (!document.getElementById('listStartDate').value) {
+    document.getElementById('listStartDate').value = data.min_date || '';
+  }
+  if (!document.getElementById('listEndDate').value) {
+    document.getElementById('listEndDate').value = document.getElementById('endDate').value || '';
   }
   if ((data.products || []).length) {
     await loadProductData();
@@ -582,9 +623,27 @@ async function loadProductData() {
   buildProfitRateChart(rows, labels);
 }
 
+async function loadAllProductData() {
+  const start = document.getElementById('listStartDate').value;
+  const end = document.getElementById('listEndDate').value;
+  const res = await fetch(`/api/all-product-data?start=${start}&end=${end}`);
+  const data = await res.json();
+  const rows = data.rows || [];
+
+  const tb = document.querySelector('#allDetailTable tbody');
+  tb.innerHTML = rows.map((r) => `<tr>
+    <td>${r.record_date}</td><td>${r.product}</td><td>${fmt(r.current_price)}</td><td>${fmt(r.cost_price)}</td><td>${fmt(r.investment_cost)}</td><td>${fmt(r.book_income)}</td><td class="${profitClass(r.profit_loss)}">${fmt(r.profit_loss)}</td><td class="${profitClass(r.profit_loss_rate)}">${fmt(r.profit_loss_rate)}</td><td>${fmt(r.daily_profit_change)}</td>
+  </tr>`).join('');
+
+  const info = document.getElementById('listingInfo');
+  info.textContent = `排序：商品（遞減）＋日期（遞減）｜共 ${rows.length} 筆`;
+}
+
 document.getElementById('productSelect').addEventListener('change', loadProductData);
 document.getElementById('startDate').addEventListener('change', loadProductData);
 document.getElementById('endDate').addEventListener('change', loadProductData);
+document.getElementById('listStartDate').addEventListener('change', loadAllProductData);
+document.getElementById('listEndDate').addEventListener('change', loadAllProductData);
 
 refreshProducts();
 </script>
@@ -1202,6 +1261,38 @@ def api_product_data():
             FROM daily_stock_records
             WHERE {where}
             ORDER BY record_date
+            """,
+            args,
+        ).fetchall()
+
+    return jsonify({"rows": [dict(r) for r in rows]})
+
+
+@app.route("/api/all-product-data")
+def api_all_product_data():
+    start = (request.args.get("start") or "").strip()
+    end = (request.args.get("end") or "").strip()
+
+    clauses = ["1=1"]
+    args: List = []
+    if start:
+        clauses.append("record_date >= ?")
+        args.append(start)
+    if end:
+        clauses.append("record_date <= ?")
+        args.append(end)
+
+    where = " AND ".join(clauses)
+
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT record_date, product, current_price, cost_price,
+                   investment_cost, book_income, profit_loss,
+                   profit_loss_rate, daily_profit_change
+            FROM daily_stock_records
+            WHERE {where}
+            ORDER BY product DESC, record_date DESC
             """,
             args,
         ).fetchall()
