@@ -125,3 +125,45 @@
 
 ## 更新時間
 - 本摘要最後更新：2026-04-15
+
+---
+
+## 今日調整摘要（2026-04-20）
+
+### 1. 補上「股數」欄位（前後端 + DB）
+- OCR 解析結果新增 `shares`（股數）
+- 上傳頁可手動編修股數後再寫入
+- `daily_stock_records` 新增 `shares REAL` 欄位
+- 已加入既有資料庫自動補欄位（migration）
+- 查詢 API 也回傳 `shares`，包含：
+  - `GET /api/product-data`
+  - `GET /api/all-product-data`
+
+### 2. 新增「總投資」頁籤
+- 最上方新增第四個頁籤：`總投資`
+- 將原本「查詢與圖表」頁最下方的
+  - 「總投資成本 / 總帳面收入（全商品）」曲線
+  移動到此新頁籤
+
+### 3. 總投資頁新增每日總覽表格
+- 在總投資曲線下方新增表格，顯示每日：
+  - 總投資成本
+  - 總帳面收入
+  - 總損益
+  - 總損益率(%)
+
+### 4. API 擴充（總投資序列）
+- `GET /api/portfolio-totals-series` 新增回傳欄位：
+  - `total_profit_loss`
+  - `total_profit_rate`
+- `total_profit_rate` 計算方式：
+  - `SUM(profit_loss) * 100 / SUM(investment_cost)`
+  - 若分母為 0 則回傳 `NULL`
+
+### 5. 驗證紀錄
+- `sample.png` 實測可解析出 `shares`（例如 `16,000`）
+- 寫入與查詢流程已驗證 `shares` 可正確保存與回傳
+- `python3 -m py_compile app.py` 通過
+
+## 更新時間
+- 本摘要最後更新：2026-04-20

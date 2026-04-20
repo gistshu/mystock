@@ -119,6 +119,7 @@ HTML = """
     <div class="tabs">
       <button class="tab active" id="tabUploadBtn" onclick="switchTab('upload')">上傳與寫入</button>
       <button class="tab" id="tabQueryBtn" onclick="switchTab('query')">查詢與圖表</button>
+      <button class="tab" id="tabPortfolioBtn" onclick="switchTab('portfolio')">總投資</button>
       <button class="tab" id="tabListingBtn" onclick="switchTab('listing')">區間清單</button>
     </div>
 
@@ -155,6 +156,7 @@ HTML = """
           <thead>
             <tr>
               <th>商品</th>
+              <th>股數</th>
               <th>現價</th>
               <th>成本價</th>
               <th>投資成本</th>
@@ -209,19 +211,49 @@ HTML = """
         <table id="detailTable">
           <thead>
             <tr>
-              <th>日期</th><th>商品</th><th>現價</th><th>成本價</th><th>投資成本</th><th>帳面收入</th><th>損益</th><th>損益率(%)</th><th>日增減損益</th>
+              <th>日期</th><th>商品</th><th>股數</th><th>現價</th><th>成本價</th><th>投資成本</th><th>帳面收入</th><th>損益</th><th>損益率(%)</th><th>日增減損益</th>
             </tr>
           </thead>
           <tbody></tbody>
         </table>
       </div>
 
+    </section>
+
+    <section id="tabPortfolio" class="card hidden">
+      <h2>4) 總投資每日趨勢與明細</h2>
+      <div class="grid grid-2">
+        <div>
+          <label>起始日期</label>
+          <input type="date" id="portfolioStartDate" />
+        </div>
+        <div>
+          <label>結束日期</label>
+          <input type="date" id="portfolioEndDate" value="{{ today }}" />
+        </div>
+      </div>
+      <div class="flex" style="margin-top:12px;">
+        <button onclick="loadPortfolioPageData()">查詢總投資</button>
+      </div>
+
       <h2 style="margin-top:16px;">總投資成本 / 總帳面收入（全商品）</h2>
       <div style="margin-top: 14px;"><canvas id="chartPortfolioTotals"></canvas></div>
+
+      <h2 style="margin-top:16px;">每日總覽</h2>
+      <div style="overflow:auto;">
+        <table id="portfolioDailyTable">
+          <thead>
+            <tr>
+              <th>日期</th><th>總投資成本</th><th>總帳面收入</th><th>總損益</th><th>總損益率(%)</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
     </section>
 
     <section id="tabListing" class="card hidden">
-      <h2>4) 依起訖日期查看所有商品資訊清單</h2>
+      <h2>5) 依起訖日期查看所有商品資訊清單</h2>
       <div class="grid grid-2">
         <div>
           <label>起始日期</label>
@@ -241,7 +273,7 @@ HTML = """
         <table id="allDetailTable">
           <thead>
             <tr>
-              <th>日期</th><th>商品</th><th>現價</th><th>成本價</th><th>投資成本</th><th>帳面收入</th><th>損益</th><th>損益率(%)</th><th>日增減損益</th>
+              <th>日期</th><th>商品</th><th>股數</th><th>現價</th><th>成本價</th><th>投資成本</th><th>帳面收入</th><th>損益</th><th>損益率(%)</th><th>日增減損益</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -263,12 +295,17 @@ let latestProductRows = [];
 function switchTab(which) {
   document.getElementById('tabUpload').classList.toggle('hidden', which !== 'upload');
   document.getElementById('tabQuery').classList.toggle('hidden', which !== 'query');
+  document.getElementById('tabPortfolio').classList.toggle('hidden', which !== 'portfolio');
   document.getElementById('tabListing').classList.toggle('hidden', which !== 'listing');
   document.getElementById('tabUploadBtn').classList.toggle('active', which === 'upload');
   document.getElementById('tabQueryBtn').classList.toggle('active', which === 'query');
+  document.getElementById('tabPortfolioBtn').classList.toggle('active', which === 'portfolio');
   document.getElementById('tabListingBtn').classList.toggle('active', which === 'listing');
   if (which === 'query') {
     refreshProducts();
+  }
+  if (which === 'portfolio') {
+    loadPortfolioPageData();
   }
   if (which === 'listing') {
     loadAllProductData();
@@ -303,6 +340,7 @@ function renderOverview() {
 function rowHtml(r) {
   return `<tr>
     <td><input value="${r.product ?? ''}" /></td>
+    <td><input value="${r.shares ?? ''}" /></td>
     <td><input value="${r.current_price ?? ''}" /></td>
     <td><input value="${r.cost_price ?? ''}" /></td>
     <td><input value="${r.investment_cost ?? ''}" /></td>
@@ -319,7 +357,7 @@ function renderRows() {
 }
 
 function addRow() {
-  parsedRows.push({ product: '', current_price: '', cost_price: '', investment_cost: '', book_income: '', profit_loss: '', profit_loss_rate: '' });
+  parsedRows.push({ product: '', shares: '', current_price: '', cost_price: '', investment_cost: '', book_income: '', profit_loss: '', profit_loss_rate: '' });
   renderRows();
 }
 
@@ -329,12 +367,13 @@ function collectRowsFromTable() {
     const cells = tr.querySelectorAll('td input');
     const obj = {
       product: cells[0].value.trim(),
-      current_price: numVal(cells[1].value),
-      cost_price: numVal(cells[2].value),
-      investment_cost: numVal(cells[3].value),
-      book_income: numVal(cells[4].value),
-      profit_loss: numVal(cells[5].value),
-      profit_loss_rate: numVal(cells[6].value),
+      shares: numVal(cells[1].value),
+      current_price: numVal(cells[2].value),
+      cost_price: numVal(cells[3].value),
+      investment_cost: numVal(cells[4].value),
+      book_income: numVal(cells[5].value),
+      profit_loss: numVal(cells[6].value),
+      profit_loss_rate: numVal(cells[7].value),
     };
     if (obj.product) rows.push(obj);
   });
@@ -421,8 +460,14 @@ async function refreshProducts() {
   if (!document.getElementById('listStartDate').value) {
     document.getElementById('listStartDate').value = data.min_date || '';
   }
+  if (!document.getElementById('portfolioStartDate').value) {
+    document.getElementById('portfolioStartDate').value = data.min_date || '';
+  }
   if (!document.getElementById('listEndDate').value) {
     document.getElementById('listEndDate').value = document.getElementById('endDate').value || '';
+  }
+  if (!document.getElementById('portfolioEndDate').value) {
+    document.getElementById('portfolioEndDate').value = document.getElementById('endDate').value || '';
   }
   if ((data.products || []).length) {
     await loadProductData();
@@ -514,12 +559,16 @@ async function loadPortfolioTotals(start, end) {
   asOfEl.textContent = data.as_of_date || '-';
 }
 
-async function loadPortfolioTotalsSeries(start, end) {
+async function loadPortfolioPageData() {
+  const start = document.getElementById('portfolioStartDate').value;
+  const end = document.getElementById('portfolioEndDate').value;
   const res = await fetch(`/api/portfolio-totals-series?start=${start}&end=${end}`);
   const data = await res.json();
   const rows = data.rows || [];
+
   if (!rows.length) {
     destroyPortfolioChart();
+    document.querySelector('#portfolioDailyTable tbody').innerHTML = '';
     return;
   }
 
@@ -544,6 +593,11 @@ async function loadPortfolioTotalsSeries(start, end) {
       scales: { y: { beginAtZero: false } }
     }
   });
+
+  const tb = document.querySelector('#portfolioDailyTable tbody');
+  tb.innerHTML = rows.map((r) => `<tr>
+    <td>${r.record_date}</td><td>${fmt(r.total_investment_cost)}</td><td>${fmt(r.total_book_income)}</td><td class="${profitClass(r.total_profit_loss)}">${fmt(r.total_profit_loss)}</td><td class="${profitClass(r.total_profit_rate)}">${fmt(r.total_profit_rate)}</td>
+  </tr>`).join('');
 }
 
 async function loadProductData() {
@@ -551,7 +605,6 @@ async function loadProductData() {
   const start = document.getElementById('startDate').value;
   const end = document.getElementById('endDate').value;
   await loadPortfolioTotals(start, end);
-  await loadPortfolioTotalsSeries(start, end);
 
   if (!product) {
     latestProductRows = [];
@@ -567,7 +620,7 @@ async function loadProductData() {
 
   const tb = document.querySelector('#detailTable tbody');
   tb.innerHTML = rows.map((r) => `<tr>
-    <td>${r.record_date}</td><td>${r.product}</td><td>${fmt(r.current_price)}</td><td>${fmt(r.cost_price)}</td><td>${fmt(r.investment_cost)}</td><td>${fmt(r.book_income)}</td><td class="${profitClass(r.profit_loss)}">${fmt(r.profit_loss)}</td><td class="${profitClass(r.profit_loss_rate)}">${fmt(r.profit_loss_rate)}</td><td>${fmt(r.daily_profit_change)}</td>
+    <td>${r.record_date}</td><td>${r.product}</td><td>${fmt(r.shares, 0)}</td><td>${fmt(r.current_price)}</td><td>${fmt(r.cost_price)}</td><td>${fmt(r.investment_cost)}</td><td>${fmt(r.book_income)}</td><td class="${profitClass(r.profit_loss)}">${fmt(r.profit_loss)}</td><td class="${profitClass(r.profit_loss_rate)}">${fmt(r.profit_loss_rate)}</td><td>${fmt(r.daily_profit_change)}</td>
   </tr>`).join('');
 
   const latest = rows[rows.length - 1] || {};
@@ -632,7 +685,7 @@ async function loadAllProductData() {
 
   const tb = document.querySelector('#allDetailTable tbody');
   tb.innerHTML = rows.map((r) => `<tr>
-    <td>${r.record_date}</td><td>${r.product}</td><td>${fmt(r.current_price)}</td><td>${fmt(r.cost_price)}</td><td>${fmt(r.investment_cost)}</td><td>${fmt(r.book_income)}</td><td class="${profitClass(r.profit_loss)}">${fmt(r.profit_loss)}</td><td class="${profitClass(r.profit_loss_rate)}">${fmt(r.profit_loss_rate)}</td><td>${fmt(r.daily_profit_change)}</td>
+    <td>${r.record_date}</td><td>${r.product}</td><td>${fmt(r.shares, 0)}</td><td>${fmt(r.current_price)}</td><td>${fmt(r.cost_price)}</td><td>${fmt(r.investment_cost)}</td><td>${fmt(r.book_income)}</td><td class="${profitClass(r.profit_loss)}">${fmt(r.profit_loss)}</td><td class="${profitClass(r.profit_loss_rate)}">${fmt(r.profit_loss_rate)}</td><td>${fmt(r.daily_profit_change)}</td>
   </tr>`).join('');
 
   const info = document.getElementById('listingInfo');
@@ -642,6 +695,8 @@ async function loadAllProductData() {
 document.getElementById('productSelect').addEventListener('change', loadProductData);
 document.getElementById('startDate').addEventListener('change', loadProductData);
 document.getElementById('endDate').addEventListener('change', loadProductData);
+document.getElementById('portfolioStartDate').addEventListener('change', loadPortfolioPageData);
+document.getElementById('portfolioEndDate').addEventListener('change', loadPortfolioPageData);
 document.getElementById('listStartDate').addEventListener('change', loadAllProductData);
 document.getElementById('listEndDate').addEventListener('change', loadAllProductData);
 
@@ -682,6 +737,7 @@ def init_db() -> None:
                 record_date TEXT NOT NULL,
                 source_file TEXT NOT NULL,
                 product TEXT NOT NULL,
+                shares REAL,
                 current_price REAL,
                 cost_price REAL,
                 investment_cost REAL,
@@ -696,6 +752,9 @@ def init_db() -> None:
             );
             """
         )
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(daily_stock_records)").fetchall()]
+        if "shares" not in cols:
+            conn.execute("ALTER TABLE daily_stock_records ADD COLUMN shares REAL")
 
 
 def safe_float(text: str) -> Optional[float]:
@@ -901,12 +960,13 @@ def parse_table_rows(lines: List[Dict]) -> List[Dict]:
         if len(core_nums) < 5:
             continue
 
-        # 從尾端固定回推欄位，避免前面股數干擾
+        # 從尾端固定回推欄位，避免前方欄位順序波動
         profit_loss = core_nums[-1]
         book_income = core_nums[-2]
         investment_cost = core_nums[-3]
         cost_price = core_nums[-4]
         current_price = core_nums[-5]
+        shares = core_nums[-6] if len(core_nums) >= 6 else None
 
         product = ""
         m = re.search(r"(?:下單\s+)?明細\s+(.+?)\s+(現股|融資|融券|零股)\s", text)
@@ -927,6 +987,7 @@ def parse_table_rows(lines: List[Dict]) -> List[Dict]:
 
         row = {
             "product": product,
+            "shares": shares,
             "current_price": current_price,
             "cost_price": cost_price,
             "investment_cost": investment_cost,
@@ -941,11 +1002,11 @@ def parse_table_rows(lines: List[Dict]) -> List[Dict]:
     dedup: Dict[str, Dict] = {}
     for r in rows:
         k = r["product"]
-        score = sum(v is not None for v in [r["current_price"], r["cost_price"], r["investment_cost"], r["book_income"], r["profit_loss"], r["profit_loss_rate"]])
+        score = sum(v is not None for v in [r["shares"], r["current_price"], r["cost_price"], r["investment_cost"], r["book_income"], r["profit_loss"], r["profit_loss_rate"]])
         if k not in dedup:
             dedup[k] = r
         else:
-            old_score = sum(v is not None for v in [dedup[k]["current_price"], dedup[k]["cost_price"], dedup[k]["investment_cost"], dedup[k]["book_income"], dedup[k]["profit_loss"], dedup[k]["profit_loss_rate"]])
+            old_score = sum(v is not None for v in [dedup[k]["shares"], dedup[k]["current_price"], dedup[k]["cost_price"], dedup[k]["investment_cost"], dedup[k]["book_income"], dedup[k]["profit_loss"], dedup[k]["profit_loss_rate"]])
             if score > old_score:
                 dedup[k] = r
 
@@ -1049,6 +1110,7 @@ def api_save():
         cleaned_rows.append(
             {
                 "product": product,
+                "shares": safe_float(r.get("shares")),
                 "current_price": safe_float(r.get("current_price")),
                 "cost_price": safe_float(r.get("cost_price")),
                 "investment_cost": safe_float(r.get("investment_cost")),
@@ -1099,13 +1161,14 @@ def api_save():
                 """
                 INSERT INTO daily_stock_records (
                     record_date, source_file, product, current_price,
-                    cost_price, investment_cost, book_income, profit_loss,
+                    shares, cost_price, investment_cost, book_income, profit_loss,
                     profit_loss_rate, daily_profit_change, raw_row_text,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
                 ON CONFLICT(record_date, product) DO UPDATE SET
                     source_file = excluded.source_file,
                     current_price = excluded.current_price,
+                    shares = excluded.shares,
                     cost_price = excluded.cost_price,
                     investment_cost = excluded.investment_cost,
                     book_income = excluded.book_income,
@@ -1119,6 +1182,7 @@ def api_save():
                     source_file,
                     row["product"],
                     row["current_price"],
+                    row["shares"],
                     row["cost_price"],
                     row["investment_cost"],
                     row["book_income"],
@@ -1220,7 +1284,12 @@ def api_portfolio_totals_series():
             f"""
             SELECT record_date,
                    SUM(investment_cost) AS total_investment_cost,
-                   SUM(book_income) AS total_book_income
+                   SUM(book_income) AS total_book_income,
+                   SUM(profit_loss) AS total_profit_loss,
+                   CASE
+                     WHEN SUM(investment_cost) IS NULL OR SUM(investment_cost) = 0 THEN NULL
+                     ELSE (SUM(profit_loss) * 100.0 / SUM(investment_cost))
+                   END AS total_profit_rate
             FROM daily_stock_records
             WHERE {where}
             GROUP BY record_date
@@ -1256,6 +1325,7 @@ def api_product_data():
         rows = conn.execute(
             f"""
             SELECT record_date, product, current_price, cost_price,
+                   shares,
                    investment_cost, book_income, profit_loss,
                    profit_loss_rate, daily_profit_change
             FROM daily_stock_records
@@ -1288,6 +1358,7 @@ def api_all_product_data():
         rows = conn.execute(
             f"""
             SELECT record_date, product, current_price, cost_price,
+                   shares,
                    investment_cost, book_income, profit_loss,
                    profit_loss_rate, daily_profit_change
             FROM daily_stock_records
