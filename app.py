@@ -269,6 +269,12 @@ HTML = """
       </div>
 
       <p class="muted" id="listingInfo" style="margin-top:10px;">排序：商品（遞減）＋日期（遞減）</p>
+      <div class="card" style="margin-top:12px;">
+        <label>曲線商品勾選</label>
+        <div id="listingProductSelector" class="grid grid-4 muted"></div>
+      </div>
+      <div style="margin-top: 14px;"><canvas id="chartListingProfit"></canvas></div>
+      <div style="margin-top: 14px;"><canvas id="chartListingProfitRate"></canvas></div>
       <div style="overflow:auto;">
         <table id="allDetailTable">
           <thead>
@@ -289,8 +295,12 @@ let chartPriceCost = null;
 let chartCapitalIncome = null;
 let chartProfitRate = null;
 let chartPortfolioTotals = null;
+let chartListingProfit = null;
+let chartListingProfitRate = null;
 let profitAxisMode = 'dual';
 let latestProductRows = [];
+let latestListingRows = [];
+let selectedListingProducts = new Set();
 
 function switchTab(which) {
   document.getElementById('tabUpload').classList.toggle('hidden', which !== 'upload');
@@ -505,6 +515,115 @@ function destroyPortfolioChart() {
   chartPortfolioTotals = null;
 }
 
+function destroyListingCharts() {
+  if (chartListingProfit) chartListingProfit.destroy();
+  if (chartListingProfitRate) chartListingProfitRate.destroy();
+  chartListingProfit = null;
+  chartListingProfitRate = null;
+}
+
+function getSeriesColor(index) {
+  const palette = ['#1d4ed8', '#b91c1c', '#047857', '#b45309', '#0ea5e9', '#7c3aed', '#be185d', '#ca8a04', '#0f766e', '#6d28d9'];
+  return palette[index % palette.length];
+}
+
+function buildListingDatasets(rows, metricKey) {
+  const products = Array.from(selectedListingProducts);
+  const labels = Array.from(new Set(rows.map((r) => r.record_date))).sort();
+  const productDateValue = new Map();
+  rows.forEach((r) => {
+    productDateValue.set(`${r.product}__${r.record_date}`, r[metricKey]);
+  });
+
+  const datasets = products.map((product, idx) => {
+    const color = getSeriesColor(idx);
+    return {
+      label: product,
+      data: labels.map((d) => {
+        const v = productDateValue.get(`${product}__${d}`);
+        return v === undefined ? null : v;
+      }),
+      borderColor: color,
+      backgroundColor: color,
+      fill: false,
+      tension: 0.2,
+      pointRadius: 2,
+      spanGaps: true,
+    };
+  });
+  return { labels, datasets };
+}
+
+function renderListingCharts() {
+  if (!latestListingRows.length || !selectedListingProducts.size) {
+    destroyListingCharts();
+    return;
+  }
+
+  const profitSeries = buildListingDatasets(latestListingRows, 'profit_loss');
+  const rateSeries = buildListingDatasets(latestListingRows, 'profit_loss_rate');
+  destroyListingCharts();
+
+  chartListingProfit = new Chart(document.getElementById('chartListingProfit').getContext('2d'), {
+    type: 'line',
+    data: profitSeries,
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { title: { display: true, text: '各商品損益曲線' } },
+      interaction: { mode: 'index', intersect: false },
+      scales: { y: { beginAtZero: false } }
+    }
+  });
+
+  chartListingProfitRate = new Chart(document.getElementById('chartListingProfitRate').getContext('2d'), {
+    type: 'line',
+    data: rateSeries,
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { title: { display: true, text: '各商品損益率曲線(%)' } },
+      interaction: { mode: 'index', intersect: false },
+      scales: { y: { beginAtZero: false } }
+    }
+  });
+}
+
+function renderListingProductSelector(rows) {
+  const el = document.getElementById('listingProductSelector');
+  const products = Array.from(new Set(rows.map((r) => r.product))).sort();
+  if (!products.length) {
+    el.innerHTML = '<span class="muted">目前無資料可勾選商品</span>';
+    selectedListingProducts = new Set();
+    destroyListingCharts();
+    return;
+  }
+
+  if (!selectedListingProducts.size) {
+    selectedListingProducts = new Set(products);
+  } else {
+    selectedListingProducts = new Set(products.filter((p) => selectedListingProducts.has(p)));
+    if (!selectedListingProducts.size) {
+      selectedListingProducts = new Set(products);
+    }
+  }
+
+  el.innerHTML = products.map((p) => `
+    <label style="display:flex; gap:6px; align-items:center; margin:0;">
+      <input type="checkbox" class="listing-product-checkbox" value="${p}" ${selectedListingProducts.has(p) ? 'checked' : ''} style="width:auto;" />
+      <span>${p}</span>
+    </label>
+  `).join('');
+
+  document.querySelectorAll('.listing-product-checkbox').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const checked = Array.from(document.querySelectorAll('.listing-product-checkbox:checked')).map((x) => x.value);
+      selectedListingProducts = new Set(checked);
+      renderListingCharts();
+    });
+  });
+}
+
 function buildProfitRateChart(rows, labels) {
   if (chartProfitRate) chartProfitRate.destroy();
   const isDual = profitAxisMode === 'dual';
@@ -595,7 +714,8 @@ async function loadPortfolioPageData() {
   });
 
   const tb = document.querySelector('#portfolioDailyTable tbody');
-  tb.innerHTML = rows.map((r) => `<tr>
+  const tableRows = [...rows].sort((a, b) => (a.record_date < b.record_date ? 1 : a.record_date > b.record_date ? -1 : 0));
+  tb.innerHTML = tableRows.map((r) => `<tr>
     <td>${r.record_date}</td><td>${fmt(r.total_investment_cost)}</td><td>${fmt(r.total_book_income)}</td><td class="${profitClass(r.total_profit_loss)}">${fmt(r.total_profit_loss)}</td><td class="${profitClass(r.total_profit_rate)}">${fmt(r.total_profit_rate)}</td>
   </tr>`).join('');
 }
@@ -682,6 +802,7 @@ async function loadAllProductData() {
   const res = await fetch(`/api/all-product-data?start=${start}&end=${end}`);
   const data = await res.json();
   const rows = data.rows || [];
+  latestListingRows = rows;
 
   const tb = document.querySelector('#allDetailTable tbody');
   tb.innerHTML = rows.map((r) => `<tr>
@@ -690,6 +811,8 @@ async function loadAllProductData() {
 
   const info = document.getElementById('listingInfo');
   info.textContent = `排序：商品（遞減）＋日期（遞減）｜共 ${rows.length} 筆`;
+  renderListingProductSelector(rows);
+  renderListingCharts();
 }
 
 document.getElementById('productSelect').addEventListener('change', loadProductData);
