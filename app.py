@@ -244,7 +244,7 @@ HTML = """
         <table id="portfolioDailyTable">
           <thead>
             <tr>
-              <th>日期</th><th>總投資成本</th><th>總帳面收入</th><th>總損益</th><th>總損益率(%)</th>
+              <th>日期</th><th>總投資成本</th><th>總帳面收入</th><th>總損益</th><th>每天差異金額</th><th>總損益率(%)</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -714,9 +714,20 @@ async function loadPortfolioPageData() {
   });
 
   const tb = document.querySelector('#portfolioDailyTable tbody');
-  const tableRows = [...rows].sort((a, b) => (a.record_date < b.record_date ? 1 : a.record_date > b.record_date ? -1 : 0));
+  const rowsWithDiff = [...rows];
+  let prevTotalProfit = null;
+  rowsWithDiff.forEach((r) => {
+    const currentProfit = numVal(r.total_profit_loss);
+    if (currentProfit === null || prevTotalProfit === null) {
+      r.daily_diff_amount = null;
+    } else {
+      r.daily_diff_amount = currentProfit - prevTotalProfit;
+    }
+    prevTotalProfit = currentProfit;
+  });
+  const tableRows = rowsWithDiff.sort((a, b) => (a.record_date < b.record_date ? 1 : a.record_date > b.record_date ? -1 : 0));
   tb.innerHTML = tableRows.map((r) => `<tr>
-    <td>${r.record_date}</td><td>${fmt(r.total_investment_cost)}</td><td>${fmt(r.total_book_income)}</td><td class="${profitClass(r.total_profit_loss)}">${fmt(r.total_profit_loss)}</td><td class="${profitClass(r.total_profit_rate)}">${fmt(r.total_profit_rate)}</td>
+    <td>${r.record_date}</td><td>${fmt(r.total_investment_cost)}</td><td>${fmt(r.total_book_income)}</td><td class="${profitClass(r.total_profit_loss)}">${fmt(r.total_profit_loss)}</td><td class="${profitClass(r.daily_diff_amount)}">${fmt(r.daily_diff_amount)}</td><td class="${profitClass(r.total_profit_rate)}">${fmt(r.total_profit_rate)}</td>
   </tr>`).join('');
 }
 
@@ -740,7 +751,7 @@ async function loadProductData() {
 
   const tb = document.querySelector('#detailTable tbody');
   tb.innerHTML = rows.map((r) => `<tr>
-    <td>${r.record_date}</td><td>${r.product}</td><td>${fmt(r.shares, 0)}</td><td>${fmt(r.current_price)}</td><td>${fmt(r.cost_price)}</td><td>${fmt(r.investment_cost)}</td><td>${fmt(r.book_income)}</td><td class="${profitClass(r.profit_loss)}">${fmt(r.profit_loss)}</td><td class="${profitClass(r.profit_loss_rate)}">${fmt(r.profit_loss_rate)}</td><td>${fmt(r.daily_profit_change)}</td>
+    <td>${r.record_date}</td><td>${r.product}</td><td>${fmt(r.shares, 0)}</td><td>${fmt(r.current_price)}</td><td>${fmt(r.cost_price)}</td><td>${fmt(r.investment_cost)}</td><td>${fmt(r.book_income)}</td><td class="${profitClass(r.profit_loss)}">${fmt(r.profit_loss)}</td><td class="${profitClass(r.profit_loss_rate)}">${fmt(r.profit_loss_rate)}</td><td class="${profitClass(r.daily_profit_change)}">${fmt(r.daily_profit_change)}</td>
   </tr>`).join('');
 
   const latest = rows[rows.length - 1] || {};
@@ -806,7 +817,7 @@ async function loadAllProductData() {
 
   const tb = document.querySelector('#allDetailTable tbody');
   tb.innerHTML = rows.map((r) => `<tr>
-    <td>${r.record_date}</td><td>${r.product}</td><td>${fmt(r.shares, 0)}</td><td>${fmt(r.current_price)}</td><td>${fmt(r.cost_price)}</td><td>${fmt(r.investment_cost)}</td><td>${fmt(r.book_income)}</td><td class="${profitClass(r.profit_loss)}">${fmt(r.profit_loss)}</td><td class="${profitClass(r.profit_loss_rate)}">${fmt(r.profit_loss_rate)}</td><td>${fmt(r.daily_profit_change)}</td>
+    <td>${r.record_date}</td><td>${r.product}</td><td>${fmt(r.shares, 0)}</td><td>${fmt(r.current_price)}</td><td>${fmt(r.cost_price)}</td><td>${fmt(r.investment_cost)}</td><td>${fmt(r.book_income)}</td><td class="${profitClass(r.profit_loss)}">${fmt(r.profit_loss)}</td><td class="${profitClass(r.profit_loss_rate)}">${fmt(r.profit_loss_rate)}</td><td class="${profitClass(r.daily_profit_change)}">${fmt(r.daily_profit_change)}</td>
   </tr>`).join('');
 
   const info = document.getElementById('listingInfo');
