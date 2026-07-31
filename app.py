@@ -928,7 +928,8 @@ def get_ocr_reader():
 
 def run_easyocr_lines(image_path: Path) -> List[Dict]:
     reader = get_ocr_reader()
-    img = Image.open(image_path).convert("RGB")
+    with Image.open(image_path) as src:
+        img = src.convert("RGB")
     arr = np.array(img)
     ocr_items = reader.readtext(arr, detail=1, paragraph=False)
     if not ocr_items:
@@ -988,13 +989,23 @@ def run_easyocr_lines(image_path: Path) -> List[Dict]:
 
 
 def crop_top_region(image_path: Path) -> Path:
-    img = Image.open(image_path)
-    w, h = img.size
-    # 多數券商截圖的主要表格在上半部，先裁上方 72% 提高 OCR 命中率
-    cropped = img.crop((0, 0, w, int(h * 0.72)))
+    with Image.open(image_path) as img:
+        w, h = img.size
+        # 多數券商截圖的主要表格在上半部，先裁上方 72% 提高 OCR 命中率
+        cropped = img.crop((0, 0, w, int(h * 0.72)))
     out = image_path.with_name(f"{image_path.stem}_top{image_path.suffix}")
     cropped.save(out)
     return out
+
+
+def cleanup_upload_files(*paths: Optional[Path]) -> None:
+    for path in paths:
+        if not path:
+            continue
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as e:
+            app.logger.warning("清理上傳暫存檔失敗：%s (%s)", path, e)
 
 
 def looks_like_product(text: str) -> bool:
@@ -1198,6 +1209,7 @@ def api_parse():
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     saved = UPLOAD_DIR / f"{stamp}_{Path(file.filename).name}"
     file.save(saved)
+    top_img = None
 
     try:
         top_img = crop_top_region(saved)
@@ -1218,6 +1230,8 @@ def api_parse():
         )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    finally:
+        cleanup_upload_files(top_img, saved)
 
 
 @app.route("/api/save", methods=["POST"])
