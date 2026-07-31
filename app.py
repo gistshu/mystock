@@ -93,6 +93,16 @@ HTML = """
     th { background: #f8fafc; }
     td input { padding: 6px; font-size: 13px; }
     .muted { color: var(--subtext); font-size: 13px; }
+    .status-banner {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid #bfdbfe;
+      background: #eff6ff;
+      color: #1e3a8a;
+      font-size: 13px;
+      font-weight: 600;
+    }
     .mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
     .kpi { background: #f8fafc; border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
     .kpi .name { font-size: 12px; color: var(--subtext); }
@@ -138,7 +148,27 @@ HTML = """
           <button onclick="parseImage()">解析截圖</button>
         </div>
       </div>
+      <div class="flex" style="margin-top:12px;">
+        <button type="button" onclick="loadRecordForEdit()">載入當日既有資料</button>
+      </div>
+      <div class="status-banner" id="editStatus">目前編輯日期：{{ today }}｜等待載入資料</div>
       <p class="muted" id="parseStatus">尚未解析。</p>
+
+      <div class="card" style="margin-top:12px;">
+        <h2 style="margin-top:0;">刪除指定日期資料</h2>
+        <div class="grid grid-3">
+          <div>
+            <label>刪除日期</label>
+            <input type="date" id="deleteDate" value="{{ today }}" />
+          </div>
+          <div style="align-self:end;">
+            <button class="btn-danger" onclick="deleteRecordDate()">刪除當天資料</button>
+          </div>
+          <div class="muted" style="align-self:end;">
+            會刪除該日期的總覽與全部商品資料，並重算日增減損益。
+          </div>
+        </div>
+      </div>
 
       <h2>2) 總覽資訊與表格預覽（可手動修正）</h2>
       <div class="grid grid-2" id="overviewGrid"></div>
@@ -244,7 +274,7 @@ HTML = """
         <table id="portfolioDailyTable">
           <thead>
             <tr>
-              <th>日期</th><th>總投資成本</th><th>總帳面收入</th><th>總損益</th><th>每天差異金額</th><th>總損益率(%)</th>
+              <th>日期</th><th>實際投資成本</th><th>剩餘資金</th><th>總投資成本</th><th>總帳面收入</th><th>總損益</th><th>每天差異金額</th><th>總損益率(%)</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -291,6 +321,7 @@ HTML = """
 <script>
 let parsedOverview = {};
 let parsedRows = [];
+let currentSourceFile = 'manual';
 let chartPriceCost = null;
 let chartCapitalIncome = null;
 let chartProfitRate = null;
@@ -327,15 +358,21 @@ function numVal(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+function setEditStatus(message) {
+  document.getElementById('editStatus').textContent = message;
+}
+
 function renderOverview() {
   const grid = document.getElementById('overviewGrid');
   grid.innerHTML = '';
-  const keys = ['account', 'total_profit_loss', 'total_profit_rate', 'total_investment_cost', 'record_count', 'raw_summary_text'];
+  const keys = ['account', 'total_profit_loss', 'total_profit_rate', 'total_investment_cost', 'actual_investment_cost', 'remaining_funds', 'record_count', 'raw_summary_text'];
   const names = {
     account: '帳號/來源',
     total_profit_loss: '總損益',
     total_profit_rate: '總損益率(%)',
     total_investment_cost: '總投資成本',
+    actual_investment_cost: '實際投資成本',
+    remaining_funds: '剩餘資金',
     record_count: '擷取筆數',
     raw_summary_text: '總覽原始文字'
   };
@@ -391,7 +428,7 @@ function collectRowsFromTable() {
 }
 
 function collectOverview() {
-  const keys = ['account', 'total_profit_loss', 'total_profit_rate', 'total_investment_cost', 'record_count', 'raw_summary_text'];
+  const keys = ['account', 'total_profit_loss', 'total_profit_rate', 'total_investment_cost', 'actual_investment_cost', 'remaining_funds', 'record_count', 'raw_summary_text'];
   const out = {};
   keys.forEach((k) => {
     out[k] = document.getElementById(`ov_${k}`)?.value ?? '';
@@ -399,6 +436,8 @@ function collectOverview() {
   out.total_profit_loss = numVal(out.total_profit_loss);
   out.total_profit_rate = numVal(out.total_profit_rate);
   out.total_investment_cost = numVal(out.total_investment_cost);
+  out.actual_investment_cost = numVal(out.actual_investment_cost);
+  out.remaining_funds = numVal(out.remaining_funds);
   out.record_count = parseInt(out.record_count || '0', 10) || 0;
   return out;
 }
@@ -413,24 +452,62 @@ async function parseImage() {
   form.append('image', file);
   form.append('record_date', recordDate);
 
+  setEditStatus(`目前編輯日期：${recordDate}｜正在解析新截圖`);
   document.getElementById('parseStatus').textContent = '解析中，請稍候...';
   const res = await fetch('/api/parse', { method: 'POST', body: form });
   const data = await res.json();
   if (!res.ok) {
+    setEditStatus(`目前編輯日期：${recordDate}｜解析失敗`);
     document.getElementById('parseStatus').textContent = `解析失敗：${data.error || '未知錯誤'}`;
     return;
   }
   parsedOverview = data.summary || {};
   parsedRows = data.rows || [];
+  currentSourceFile = data.source_file || 'manual';
   renderOverview();
   renderRows();
+  setEditStatus(`目前編輯日期：${recordDate}｜已載入新截圖，來源：${currentSourceFile}`);
   document.getElementById('parseStatus').textContent = `解析完成，共 ${parsedRows.length} 筆。若 OCR 有誤可直接修改後再存檔。`;
+}
+
+async function loadRecordForEdit() {
+  const recordDate = document.getElementById('recordDate').value;
+  if (!recordDate) return alert('請選擇記錄日期');
+
+  setEditStatus(`目前編輯日期：${recordDate}｜正在載入既有資料`);
+  document.getElementById('parseStatus').textContent = `${recordDate} 資料載入中...`;
+  const res = await fetch(`/api/record-by-date?record_date=${encodeURIComponent(recordDate)}`);
+  const data = await res.json();
+  if (!res.ok) {
+    setEditStatus(`目前編輯日期：${recordDate}｜載入失敗`);
+    document.getElementById('parseStatus').textContent = `載入失敗：${data.error || '未知錯誤'}`;
+    return;
+  }
+
+  if (!data.found) {
+    parsedOverview = {};
+    parsedRows = [];
+    currentSourceFile = 'manual';
+    renderOverview();
+    renderRows();
+    setEditStatus(`目前編輯日期：${recordDate}｜尚無已儲存資料`);
+    document.getElementById('parseStatus').textContent = `${recordDate} 沒有已儲存資料，可直接解析截圖或手動新增。`;
+    return;
+  }
+
+  parsedOverview = data.summary || {};
+  parsedRows = data.rows || [];
+  currentSourceFile = data.source_file || 'manual';
+  renderOverview();
+  renderRows();
+  setEditStatus(`目前編輯日期：${recordDate}｜已載入既有資料，來源：${currentSourceFile}`);
+  document.getElementById('parseStatus').textContent = `${recordDate} 資料已載入，共 ${parsedRows.length} 筆，可直接編輯後儲存。`;
 }
 
 async function saveRows() {
   const payload = {
     record_date: document.getElementById('recordDate').value,
-    source_file: document.getElementById('screenshot').files[0]?.name || 'manual',
+    source_file: document.getElementById('screenshot').files[0]?.name || currentSourceFile || 'manual',
     summary: collectOverview(),
     rows: collectRowsFromTable(),
   };
@@ -445,8 +522,38 @@ async function saveRows() {
   const data = await res.json();
   if (!res.ok) return alert(data.error || '寫入失敗');
   alert(`寫入成功：${data.saved_count} 筆，已更新日增減損益`);
+  currentSourceFile = data.source_file || payload.source_file;
+  setEditStatus(`目前編輯日期：${payload.record_date}｜已儲存 ${data.saved_count} 筆，來源：${currentSourceFile}`);
   switchTab('query');
   await refreshProducts();
+}
+
+async function deleteRecordDate() {
+  const recordDate = document.getElementById('deleteDate').value;
+  if (!recordDate) return alert('請選擇要刪除的日期');
+  if (!confirm(`${recordDate} 的總覽與商品資料都會被刪除，確定要繼續嗎？`)) return;
+
+  const res = await fetch('/api/delete-by-date', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ record_date: recordDate }),
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || '刪除失敗');
+
+  alert(`刪除完成：總覽 ${data.deleted_summary_count} 筆，商品 ${data.deleted_stock_count} 筆`);
+  if (document.getElementById('recordDate').value === recordDate) {
+    parsedOverview = {};
+    parsedRows = [];
+    currentSourceFile = 'manual';
+    renderOverview();
+    renderRows();
+    setEditStatus(`目前編輯日期：${recordDate}｜資料已刪除`);
+    document.getElementById('parseStatus').textContent = `${recordDate} 資料已刪除。`;
+  }
+  await refreshProducts();
+  await loadPortfolioPageData();
+  await loadAllProductData();
 }
 
 async function refreshProducts() {
@@ -554,15 +661,34 @@ function buildListingDatasets(rows, metricKey) {
   return { labels, datasets };
 }
 
+function getFilteredListingRows() {
+  if (!latestListingRows.length) return [];
+  if (!selectedListingProducts.size) return [];
+  return latestListingRows.filter((r) => selectedListingProducts.has(r.product));
+}
+
+function renderListingTable(rows) {
+  const tb = document.querySelector('#allDetailTable tbody');
+  tb.innerHTML = rows.map((r) => `<tr>
+    <td>${r.record_date}</td><td>${r.product}</td><td>${fmt(r.shares, 0)}</td><td>${fmt(r.current_price)}</td><td>${fmt(r.cost_price)}</td><td>${fmt(r.investment_cost)}</td><td>${fmt(r.book_income)}</td><td class="${profitClass(r.profit_loss)}">${fmt(r.profit_loss)}</td><td class="${profitClass(r.profit_loss_rate)}">${fmt(r.profit_loss_rate)}</td><td class="${profitClass(r.daily_profit_change)}">${fmt(r.daily_profit_change)}</td>
+  </tr>`).join('');
+
+  const info = document.getElementById('listingInfo');
+  info.textContent = `排序：商品（遞減）＋日期（遞減）｜目前顯示 ${rows.length} 筆`;
+}
+
 function renderListingCharts() {
-  if (!latestListingRows.length || !selectedListingProducts.size) {
+  const filteredRows = getFilteredListingRows();
+  if (!filteredRows.length) {
     destroyListingCharts();
+    renderListingTable([]);
     return;
   }
 
-  const profitSeries = buildListingDatasets(latestListingRows, 'profit_loss');
-  const rateSeries = buildListingDatasets(latestListingRows, 'profit_loss_rate');
+  const profitSeries = buildListingDatasets(filteredRows, 'profit_loss');
+  const rateSeries = buildListingDatasets(filteredRows, 'profit_loss_rate');
   destroyListingCharts();
+  renderListingTable(filteredRows);
 
   chartListingProfit = new Chart(document.getElementById('chartListingProfit').getContext('2d'), {
     type: 'line',
@@ -694,6 +820,7 @@ async function loadPortfolioPageData() {
   const labels = rows.map((r) => r.record_date);
   const totalInvestment = rows.map((r) => r.total_investment_cost);
   const totalBookIncome = rows.map((r) => r.total_book_income);
+  const actualInvestment = rows.map((r) => r.actual_investment_cost);
   destroyPortfolioChart();
   chartPortfolioTotals = new Chart(document.getElementById('chartPortfolioTotals').getContext('2d'), {
     type: 'line',
@@ -701,6 +828,7 @@ async function loadPortfolioPageData() {
       labels,
       datasets: [
         { label: '總投資成本', data: totalInvestment, borderColor: '#065f46', backgroundColor: '#065f46', fill: false, tension: 0.2, pointRadius: 2 },
+        { label: '實際投資成本', data: actualInvestment, borderColor: '#1d4ed8', backgroundColor: '#1d4ed8', fill: false, tension: 0.2, pointRadius: 2 },
         { label: '總帳面收入', data: totalBookIncome, borderColor: '#9a3412', backgroundColor: '#9a3412', fill: false, tension: 0.2, pointRadius: 2 },
       ]
     },
@@ -727,7 +855,7 @@ async function loadPortfolioPageData() {
   });
   const tableRows = rowsWithDiff.sort((a, b) => (a.record_date < b.record_date ? 1 : a.record_date > b.record_date ? -1 : 0));
   tb.innerHTML = tableRows.map((r) => `<tr>
-    <td>${r.record_date}</td><td>${fmt(r.total_investment_cost)}</td><td>${fmt(r.total_book_income)}</td><td class="${profitClass(r.total_profit_loss)}">${fmt(r.total_profit_loss)}</td><td class="${profitClass(r.daily_diff_amount)}">${fmt(r.daily_diff_amount)}</td><td class="${profitClass(r.total_profit_rate)}">${fmt(r.total_profit_rate)}</td>
+    <td>${r.record_date}</td><td>${fmt(r.actual_investment_cost)}</td><td>${fmt(r.remaining_funds)}</td><td>${fmt(r.total_investment_cost)}</td><td>${fmt(r.total_book_income)}</td><td class="${profitClass(r.total_profit_loss)}">${fmt(r.total_profit_loss)}</td><td class="${profitClass(r.daily_diff_amount)}">${fmt(r.daily_diff_amount)}</td><td class="${profitClass(r.total_profit_rate)}">${fmt(r.total_profit_rate)}</td>
   </tr>`).join('');
 }
 
@@ -814,14 +942,6 @@ async function loadAllProductData() {
   const data = await res.json();
   const rows = data.rows || [];
   latestListingRows = rows;
-
-  const tb = document.querySelector('#allDetailTable tbody');
-  tb.innerHTML = rows.map((r) => `<tr>
-    <td>${r.record_date}</td><td>${r.product}</td><td>${fmt(r.shares, 0)}</td><td>${fmt(r.current_price)}</td><td>${fmt(r.cost_price)}</td><td>${fmt(r.investment_cost)}</td><td>${fmt(r.book_income)}</td><td class="${profitClass(r.profit_loss)}">${fmt(r.profit_loss)}</td><td class="${profitClass(r.profit_loss_rate)}">${fmt(r.profit_loss_rate)}</td><td class="${profitClass(r.daily_profit_change)}">${fmt(r.daily_profit_change)}</td>
-  </tr>`).join('');
-
-  const info = document.getElementById('listingInfo');
-  info.textContent = `排序：商品（遞減）＋日期（遞減）｜共 ${rows.length} 筆`;
   renderListingProductSelector(rows);
   renderListingCharts();
 }
@@ -829,12 +949,19 @@ async function loadAllProductData() {
 document.getElementById('productSelect').addEventListener('change', loadProductData);
 document.getElementById('startDate').addEventListener('change', loadProductData);
 document.getElementById('endDate').addEventListener('change', loadProductData);
+document.getElementById('recordDate').addEventListener('change', () => {
+  document.getElementById('deleteDate').value = document.getElementById('recordDate').value;
+  loadRecordForEdit();
+});
 document.getElementById('portfolioStartDate').addEventListener('change', loadPortfolioPageData);
 document.getElementById('portfolioEndDate').addEventListener('change', loadPortfolioPageData);
 document.getElementById('listStartDate').addEventListener('change', loadAllProductData);
 document.getElementById('listEndDate').addEventListener('change', loadAllProductData);
 
+renderOverview();
+renderRows();
 refreshProducts();
+loadRecordForEdit();
 </script>
 </body>
 </html>
@@ -859,6 +986,8 @@ def init_db() -> None:
                 total_profit_loss REAL,
                 total_profit_rate REAL,
                 total_investment_cost REAL,
+                actual_investment_cost REAL,
+                remaining_funds REAL,
                 record_count INTEGER DEFAULT 0,
                 raw_summary_text TEXT,
                 created_at TEXT NOT NULL,
@@ -889,6 +1018,11 @@ def init_db() -> None:
         cols = [r[1] for r in conn.execute("PRAGMA table_info(daily_stock_records)").fetchall()]
         if "shares" not in cols:
             conn.execute("ALTER TABLE daily_stock_records ADD COLUMN shares REAL")
+        summary_cols = [r[1] for r in conn.execute("PRAGMA table_info(daily_summary)").fetchall()]
+        if "actual_investment_cost" not in summary_cols:
+            conn.execute("ALTER TABLE daily_summary ADD COLUMN actual_investment_cost REAL")
+        if "remaining_funds" not in summary_cols:
+            conn.execute("ALTER TABLE daily_summary ADD COLUMN remaining_funds REAL")
 
 
 def safe_float(text: str) -> Optional[float]:
@@ -1025,6 +1159,8 @@ def parse_summary(lines: List[Dict], full_text: str, row_count: int) -> Dict:
         "total_profit_loss": None,
         "total_profit_rate": None,
         "total_investment_cost": None,
+        "actual_investment_cost": None,
+        "remaining_funds": None,
         "record_count": row_count,
         "raw_summary_text": "",
     }
@@ -1188,6 +1324,89 @@ def recalc_daily_profit_change(product: Optional[str] = None) -> None:
             prev_by_product[p] = curr
 
 
+def validate_record_date(record_date: str) -> Optional[str]:
+    value = (record_date or "").strip()
+    if not value:
+        return "record_date 必填"
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        return "record_date 格式需為 YYYY-MM-DD"
+    return None
+
+
+def delete_record_date(record_date: str) -> Dict[str, int]:
+    with get_conn() as conn:
+        summary_count = conn.execute(
+            "SELECT COUNT(*) FROM daily_summary WHERE record_date = ?",
+            (record_date,),
+        ).fetchone()[0]
+        stock_count = conn.execute(
+            "SELECT COUNT(*) FROM daily_stock_records WHERE record_date = ?",
+            (record_date,),
+        ).fetchone()[0]
+        conn.execute("DELETE FROM daily_summary WHERE record_date = ?", (record_date,))
+        conn.execute("DELETE FROM daily_stock_records WHERE record_date = ?", (record_date,))
+
+    recalc_daily_profit_change()
+    return {
+        "deleted_summary_count": int(summary_count or 0),
+        "deleted_stock_count": int(stock_count or 0),
+    }
+
+
+def get_record_for_edit(record_date: str) -> Dict:
+    with get_conn() as conn:
+        summary_row = conn.execute(
+            """
+            SELECT record_date, source_file, account, total_profit_loss,
+                   total_profit_rate, total_investment_cost, actual_investment_cost,
+                   remaining_funds, record_count, raw_summary_text
+            FROM daily_summary
+            WHERE record_date = ?
+            ORDER BY updated_at DESC, id DESC
+            LIMIT 1
+            """,
+            (record_date,),
+        ).fetchone()
+        stock_rows = conn.execute(
+            """
+            SELECT product, shares, current_price, cost_price, investment_cost,
+                   book_income, profit_loss, profit_loss_rate, raw_row_text
+            FROM daily_stock_records
+            WHERE record_date = ?
+            ORDER BY product
+            """,
+            (record_date,),
+        ).fetchall()
+
+    if not summary_row and not stock_rows:
+        return {"found": False, "record_date": record_date, "summary": {}, "rows": [], "source_file": "manual"}
+
+    summary = dict(summary_row) if summary_row else {
+        "record_date": record_date,
+        "source_file": "manual",
+        "account": "",
+        "total_profit_loss": None,
+        "total_profit_rate": None,
+        "total_investment_cost": None,
+        "actual_investment_cost": None,
+        "remaining_funds": None,
+        "record_count": len(stock_rows),
+        "raw_summary_text": "",
+    }
+    summary["record_count"] = summary.get("record_count") or len(stock_rows)
+    source_file = summary.get("source_file") or "manual"
+
+    return {
+        "found": True,
+        "record_date": record_date,
+        "summary": summary,
+        "rows": [dict(r) for r in stock_rows],
+        "source_file": source_file,
+    }
+
+
 @app.route("/")
 def index():
     return render_template_string(HTML, today=date.today().isoformat())
@@ -1242,13 +1461,9 @@ def api_save():
     summary = data.get("summary") or {}
     rows = data.get("rows") or []
 
-    if not record_date:
-        return jsonify({"error": "record_date 必填"}), 400
-
-    try:
-        datetime.strptime(record_date, "%Y-%m-%d")
-    except ValueError:
-        return jsonify({"error": "record_date 格式需為 YYYY-MM-DD"}), 400
+    date_error = validate_record_date(record_date)
+    if date_error:
+        return jsonify({"error": date_error}), 400
 
     cleaned_rows = []
     for r in rows:
@@ -1273,19 +1488,26 @@ def api_save():
         return jsonify({"error": "至少需一筆有效商品資料"}), 400
 
     now = datetime.now().isoformat(timespec="seconds")
+    total_investment_cost = safe_float(summary.get("total_investment_cost"))
+    actual_investment_cost = safe_float(summary.get("actual_investment_cost"))
+
     with get_conn() as conn:
+        conn.execute("DELETE FROM daily_summary WHERE record_date = ?", (record_date,))
+        conn.execute("DELETE FROM daily_stock_records WHERE record_date = ?", (record_date,))
         conn.execute(
             """
             INSERT INTO daily_summary (
                 record_date, source_file, account, total_profit_loss,
-                total_profit_rate, total_investment_cost, record_count,
-                raw_summary_text, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                total_profit_rate, total_investment_cost, actual_investment_cost,
+                remaining_funds, record_count, raw_summary_text, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(record_date, source_file) DO UPDATE SET
                 account = excluded.account,
                 total_profit_loss = excluded.total_profit_loss,
                 total_profit_rate = excluded.total_profit_rate,
                 total_investment_cost = excluded.total_investment_cost,
+                actual_investment_cost = excluded.actual_investment_cost,
+                remaining_funds = excluded.remaining_funds,
                 record_count = excluded.record_count,
                 raw_summary_text = excluded.raw_summary_text,
                 updated_at = excluded.updated_at
@@ -1296,7 +1518,9 @@ def api_save():
                 (summary.get("account") or "").strip(),
                 safe_float(summary.get("total_profit_loss")),
                 safe_float(summary.get("total_profit_rate")),
-                safe_float(summary.get("total_investment_cost")),
+                total_investment_cost,
+                actual_investment_cost,
+                safe_float(summary.get("remaining_funds")),
                 int(summary.get("record_count") or len(cleaned_rows)),
                 (summary.get("raw_summary_text") or "").strip(),
                 now,
@@ -1344,7 +1568,28 @@ def api_save():
 
     recalc_daily_profit_change()
 
-    return jsonify({"ok": True, "saved_count": len(cleaned_rows)})
+    return jsonify({"ok": True, "saved_count": len(cleaned_rows), "record_date": record_date, "source_file": source_file})
+
+
+@app.route("/api/delete-by-date", methods=["POST"])
+def api_delete_by_date():
+    data = request.get_json(silent=True) or {}
+    record_date = (data.get("record_date") or "").strip()
+    date_error = validate_record_date(record_date)
+    if date_error:
+        return jsonify({"error": date_error}), 400
+
+    deleted = delete_record_date(record_date)
+    return jsonify({"ok": True, **deleted, "record_date": record_date})
+
+
+@app.route("/api/record-by-date")
+def api_record_by_date():
+    record_date = (request.args.get("record_date") or "").strip()
+    date_error = validate_record_date(record_date)
+    if date_error:
+        return jsonify({"error": date_error}), 400
+    return jsonify(get_record_for_edit(record_date))
 
 
 @app.route("/api/products")
@@ -1361,22 +1606,22 @@ def api_portfolio_totals():
     start = (request.args.get("start") or "").strip()
     end = (request.args.get("end") or "").strip()
 
-    clauses = ["1=1"]
+    as_of_clauses = ["1=1"]
     args: List = []
     if start:
-        clauses.append("record_date >= ?")
+        as_of_clauses.append("record_date >= ?")
         args.append(start)
     if end:
-        clauses.append("record_date <= ?")
+        as_of_clauses.append("record_date <= ?")
         args.append(end)
-    where = " AND ".join(clauses)
+    as_of_where = " AND ".join(as_of_clauses)
 
     with get_conn() as conn:
         as_of_row = conn.execute(
             f"""
             SELECT MAX(record_date)
             FROM daily_stock_records
-            WHERE {where}
+            WHERE {as_of_where}
             """,
             args,
         ).fetchone()
@@ -1385,29 +1630,58 @@ def api_portfolio_totals():
             return jsonify(
                 {
                     "as_of_date": None,
+                    "actual_investment_cost": None,
+                    "remaining_funds": None,
                     "total_investment_cost": None,
                     "total_book_income": None,
                     "total_profit_loss": None,
+                    "total_profit_rate": None,
                 }
             )
 
         totals = conn.execute(
             """
-            SELECT SUM(investment_cost) AS total_investment_cost,
-                   SUM(book_income) AS total_book_income,
-                   SUM(profit_loss) AS total_profit_loss
-            FROM daily_stock_records
-            WHERE record_date = ?
+            WITH latest_summary AS (
+                SELECT actual_investment_cost, remaining_funds
+                FROM daily_summary
+                WHERE record_date = ?
+                ORDER BY updated_at DESC, id DESC
+                LIMIT 1
+            )
+            SELECT
+                SUM(r.investment_cost) AS total_investment_cost,
+                SUM(r.book_income) AS total_book_income,
+                s.actual_investment_cost AS actual_investment_cost,
+                s.remaining_funds AS remaining_funds,
+                CASE
+                    WHEN SUM(r.book_income) IS NULL
+                      OR s.actual_investment_cost IS NULL
+                      OR s.remaining_funds IS NULL THEN NULL
+                    ELSE SUM(r.book_income) - (s.actual_investment_cost - s.remaining_funds)
+                END AS total_profit_loss,
+                CASE
+                    WHEN s.actual_investment_cost IS NULL
+                      OR s.remaining_funds IS NULL
+                      OR SUM(r.book_income) IS NULL THEN NULL
+                    WHEN (s.actual_investment_cost - s.remaining_funds) = 0 THEN NULL
+                    ELSE ((SUM(r.book_income) - (s.actual_investment_cost - s.remaining_funds)) * 100.0 / (s.actual_investment_cost - s.remaining_funds))
+                END AS total_profit_rate
+            FROM daily_stock_records r
+            LEFT JOIN latest_summary s ON 1 = 1
+            WHERE r.record_date = ?
             """,
-            (as_of_date,),
+            (as_of_date, as_of_date),
         ).fetchone()
 
     return jsonify(
         {
             "as_of_date": as_of_date,
+            "actual_investment_cost": totals["actual_investment_cost"],
+            "remaining_funds": totals["remaining_funds"],
             "total_investment_cost": totals["total_investment_cost"],
             "total_book_income": totals["total_book_income"],
             "total_profit_loss": totals["total_profit_loss"],
+            "total_profit_rate": totals["total_profit_rate"],
         }
     )
 
@@ -1420,28 +1694,53 @@ def api_portfolio_totals_series():
     clauses = ["1=1"]
     args: List = []
     if start:
-        clauses.append("record_date >= ?")
+        clauses.append("r.record_date >= ?")
         args.append(start)
     if end:
-        clauses.append("record_date <= ?")
+        clauses.append("r.record_date <= ?")
         args.append(end)
     where = " AND ".join(clauses)
 
     with get_conn() as conn:
         rows = conn.execute(
             f"""
-            SELECT record_date,
-                   SUM(investment_cost) AS total_investment_cost,
-                   SUM(book_income) AS total_book_income,
-                   SUM(profit_loss) AS total_profit_loss,
+            WITH summary_by_date AS (
+                SELECT ds.record_date,
+                       ds.actual_investment_cost,
+                       ds.remaining_funds
+                FROM daily_summary ds
+                WHERE ds.id = (
+                    SELECT ds2.id
+                    FROM daily_summary ds2
+                    WHERE ds2.record_date = ds.record_date
+                    ORDER BY ds2.updated_at DESC, ds2.id DESC
+                    LIMIT 1
+                )
+            )
+            SELECT r.record_date,
+                   SUM(r.investment_cost) AS total_investment_cost,
+                   SUM(r.book_income) AS total_book_income,
+                   s.actual_investment_cost AS actual_investment_cost,
+                   s.remaining_funds AS remaining_funds,
                    CASE
-                     WHEN SUM(investment_cost) IS NULL OR SUM(investment_cost) = 0 THEN NULL
-                     ELSE (SUM(profit_loss) * 100.0 / SUM(investment_cost))
+                     WHEN SUM(r.book_income) IS NULL
+                       OR s.actual_investment_cost IS NULL
+                       OR s.remaining_funds IS NULL THEN NULL
+                     ELSE SUM(r.book_income) - (s.actual_investment_cost - s.remaining_funds)
+                   END AS total_profit_loss,
+                   CASE
+                     WHEN s.actual_investment_cost IS NULL
+                       OR s.remaining_funds IS NULL
+                       OR SUM(r.book_income) IS NULL THEN NULL
+                     WHEN (s.actual_investment_cost - s.remaining_funds) = 0 THEN NULL
+                     ELSE ((SUM(r.book_income) - (s.actual_investment_cost - s.remaining_funds)) * 100.0 / (s.actual_investment_cost - s.remaining_funds))
                    END AS total_profit_rate
-            FROM daily_stock_records
+            FROM daily_stock_records r
+            LEFT JOIN summary_by_date s
+              ON s.record_date = r.record_date
             WHERE {where}
-            GROUP BY record_date
-            ORDER BY record_date
+            GROUP BY r.record_date, s.actual_investment_cost, s.remaining_funds
+            ORDER BY r.record_date
             """,
             args,
         ).fetchall()
